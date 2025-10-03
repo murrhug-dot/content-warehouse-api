@@ -1,0 +1,33 @@
+version: '3.8'
+services:
+  content-warehouse-api:
+    image: ghcr.io/YOUR_GITHUB_USERNAME/content-warehouse-api:latest
+    container_name: content-warehouse-api
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=content-postgres
+      - DB_PORT=5432
+      - DB_NAME=content_factory
+      - DB_USER=content_admin
+      - DB_PASSWORD=ContentFactory2024!SecureDB
+      - REDIS_HOST=content-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=ContentFactory2024!Redis
+    networks:
+      - content-factory
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  content-factory:
+    external: true
