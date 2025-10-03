@@ -75,7 +75,7 @@ app.get('/api/health', async (req, res) => {
 // Get all content with filtering (UNIVERSAL ENDPOINT)
 app.get('/api/content', async (req, res) => {
   try {
-    const { type, format, page = 1, limit = 50, author, difficulty, category } = req.query;
+    const { type, format, page = 1, limit = 50, author } = req.query;
     const offset = (page - 1) * limit;
 
     // Build cache key
@@ -109,17 +109,6 @@ app.get('/api/content', async (req, res) => {
       paramCount++;
     }
 
-    if (difficulty) {
-      whereConditions.push(`course_difficulty = $${paramCount}`);
-      queryParams.push(difficulty);
-      paramCount++;
-    }
-
-    if (category) {
-      whereConditions.push(`course_category ILIKE $${paramCount}`);
-      queryParams.push(`%${category}%`);
-      paramCount++;
-    }
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
@@ -128,15 +117,13 @@ app.get('/api/content', async (req, res) => {
     const countResult = await pool.query(countQuery, queryParams);
     const total = parseInt(countResult.rows[0].count);
 
-    // Get paginated results - using correct column names
+    // Get paginated results - using actual database column names
     const dataQuery = `
       SELECT
-        id, title, youtube_video_id, created_date, ai_processing_completed,
-        cloudflare_r2_path, word_count, ai_topics, ai_sentiment,
+        id, title, video_id, created_date, ai_processing_status,
+        r2_source_path, word_count, ai_topics, ai_sentiment,
         source_type, media_type, file_format, file_size, duration_seconds,
-        dimensions, thumbnail_url, page_count, author_name,
-        resolution, course_level, course_difficulty, course_category, tags,
-        youtube_channel_name, youtube_channel_id, youtube_upload_date, youtube_view_count
+        resolution, course_level, tags, author_name, playlist_id
       FROM content
       ${whereClause}
       ORDER BY created_date DESC
@@ -154,7 +141,7 @@ app.get('/api/content', async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       },
-      filters: { type, format, author, difficulty, category }
+      filters: { type, format, author }
     };
 
     // Cache for 5 minutes
@@ -225,16 +212,15 @@ app.get('/api/search', async (req, res) => {
 
     const result = await pool.query(`
       SELECT
-        id, title, youtube_video_id, created_date, ai_processing_completed,
-        cloudflare_r2_path, ai_topics, ai_sentiment, source_type, media_type,
-        file_format, author_name, thumbnail_url, youtube_channel_name
+        id, title, video_id, created_date, ai_processing_status,
+        r2_source_path, ai_topics, ai_sentiment, source_type, media_type,
+        file_format, author_name
       FROM content
       WHERE (
         title ILIKE $1
-        OR transcript_text ILIKE $1
+        OR content_text ILIKE $1
         OR author_name ILIKE $1
         OR ai_topics::text ILIKE $1
-        OR youtube_channel_name ILIKE $1
       ) ${typeCondition}
       ORDER BY created_date DESC
       LIMIT $2 OFFSET $3
@@ -267,17 +253,15 @@ app.get('/api/stats', async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    // Get comprehensive statistics
+    // Get comprehensive statistics using actual database columns
     const queries = await Promise.all([
       pool.query('SELECT COUNT(*) FROM content'),
       pool.query('SELECT source_type, COUNT(*) as count FROM content GROUP BY source_type'),
       pool.query('SELECT media_type, COUNT(*) as count FROM content WHERE media_type IS NOT NULL GROUP BY media_type'),
-      pool.query('SELECT COUNT(*) FROM content WHERE ai_processing_completed = true'),
-      pool.query('SELECT COUNT(*) FROM content WHERE ai_processing_completed = false OR ai_processing_completed IS NULL'),
+      pool.query('SELECT COUNT(*) FROM content WHERE ai_processing_status = $1', ['completed']),
+      pool.query('SELECT COUNT(*) FROM content WHERE ai_processing_status = $1', ['pending']),
       pool.query('SELECT AVG(word_count) FROM content WHERE word_count IS NOT NULL'),
-      pool.query('SELECT created_date FROM content ORDER BY created_date DESC LIMIT 1'),
-      pool.query('SELECT course_difficulty, COUNT(*) as count FROM content WHERE course_difficulty IS NOT NULL GROUP BY course_difficulty'),
-      pool.query('SELECT course_category, COUNT(*) as count FROM content WHERE course_category IS NOT NULL GROUP BY course_category')
+      pool.query('SELECT created_date FROM content ORDER BY created_date DESC LIMIT 1')
     ]);
 
     const sourceTypeCounts = {};
@@ -290,26 +274,14 @@ app.get('/api/stats', async (req, res) => {
       mediaTypeCounts[row.media_type] = parseInt(row.count);
     });
 
-    const difficultyLevels = {};
-    queries[7].rows.forEach(row => {
-      difficultyLevels[row.course_difficulty] = parseInt(row.count);
-    });
-
-    const categoryBreakdown = {};
-    queries[8].rows.forEach(row => {
-      categoryBreakdown[row.course_category] = parseInt(row.count);
-    });
-
     const stats = {
       total_content: parseInt(queries[0].rows[0].count),
       content_by_source_type: sourceTypeCounts,
       content_by_media_type: mediaTypeCounts,
-      ai_processed_content: parseInt(queries[3].rows[0].count),
-      ai_pending_content: parseInt(queries[4].rows[0].count),
+      processed_content: parseInt(queries[3].rows[0].count),
+      pending_content: parseInt(queries[4].rows[0].count),
       average_word_count: Math.round(parseFloat(queries[5].rows[0].avg) || 0),
       latest_content: queries[6].rows[0]?.created_date || null,
-      course_difficulty_breakdown: difficultyLevels,
-      course_category_breakdown: categoryBreakdown,
       warehouse_type: 'multi-media-content',
       last_updated: new Date().toISOString()
     };
@@ -339,9 +311,9 @@ app.get('/api/content/recent', async (req, res) => {
 
     const result = await pool.query(`
       SELECT
-        id, title, youtube_video_id, created_date, ai_processing_completed,
-        cloudflare_r2_path, ai_topics, source_type, media_type, file_format,
-        thumbnail_url, author_name, youtube_channel_name, course_level, course_difficulty
+        id, title, video_id, created_date, ai_processing_status,
+        r2_source_path, ai_topics, source_type, media_type, file_format,
+        author_name, course_level
       FROM content
       ${typeCondition}
       ORDER BY created_date DESC
@@ -370,9 +342,9 @@ app.get('/api/content/by-author', async (req, res) => {
 
     const result = await pool.query(`
       SELECT
-        id, title, youtube_video_id, created_date, ai_topics, ai_sentiment,
-        source_type, media_type, file_format, author_name, thumbnail_url,
-        youtube_channel_name, course_level, course_difficulty, course_category
+        id, title, video_id, created_date, ai_topics, ai_sentiment,
+        source_type, media_type, file_format, author_name,
+        course_level
       FROM content
       WHERE author_name ILIKE $1
       ORDER BY created_date DESC
