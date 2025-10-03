@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   content-warehouse-api:
-    image: ghcr.io/murrhug-dot/content-warehouse-api:latest
+    image: ghcr.io/YOUR_GITHUB_USERNAME/content-warehouse-api:latest
     container_name: content-warehouse-api
     restart: always
     ports:
@@ -16,7 +16,7 @@ services:
       - DB_PASSWORD=ContentFactory2024!SecureDB
       - REDIS_HOST=content-redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=ContentFactory2024!Redis
+      - REDIS_PASSWORD=ContentRedis2024!Cache
     networks:
       - content-factory
     volumes:
@@ -30,5 +30,4 @@ services:
 
 networks:
   content-factory:
-
     external: true
