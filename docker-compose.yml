@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   content-warehouse-api:
-    image: ghcr.io/YOUR_GITHUB_USERNAME/content-warehouse-api:latest
+    image: ghcr.io/murrhug-dot/content-warehouse-api:latest
     container_name: content-warehouse-api
     restart: always
     ports:
@@ -30,4 +30,5 @@ services:
 
 networks:
   content-factory:
+
     external: true
